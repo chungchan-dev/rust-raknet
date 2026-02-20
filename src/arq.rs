@@ -849,6 +849,62 @@ impl SendQ {
         ret
     }
 
+    /// Flush all pending packets unconditionally, including both retransmissions and new packets.
+    ///
+    /// Unlike [`flush()`], this method does not prioritize retransmissions over new packets.
+    /// Both are returned in a single call. This is intended for use during connection close to
+    /// ensure all queued data (e.g. a game-level disconnect packet) is sent before the RakNet
+    /// Disconnect frame.
+    pub fn flush_all(&mut self, tick: i64, peer_addr: &SocketAddr) -> Vec<FrameSetPacket> {
+        self.tick(tick);
+
+        let mut ret = vec![];
+
+        if !self.sent_packet.is_empty() {
+            self.sent_packet
+                .sort_by(|x, y| x.0.sequence_number.cmp(&y.0.sequence_number));
+
+            for i in 0..self.sent_packet.len() {
+                let p = &mut self.sent_packet[i];
+                if !p.1 {
+                    raknet_log_debug!(
+                        "{} , packet {}-{}-{} resend {} times",
+                        peer_addr,
+                        p.0.sequence_number,
+                        p.0.reliable_frame_index,
+                        p.0.ordered_frame_index,
+                        p.3 + 1
+                    );
+                    ret.push(p.0.clone());
+                    p.1 = true;
+                    p.2 = tick;
+                    p.3 += 1;
+                }
+            }
+        }
+
+        if !self.packets.is_empty() {
+            for i in 0..self.packets.len() {
+                self.packets[i].sequence_number = self.sequence_number;
+                self.sequence_number += 1;
+                ret.push(self.packets[i].clone());
+                if self.packets[i].is_reliable().unwrap() {
+                    self.sent_packet.push((
+                        self.packets[i].clone(),
+                        true,
+                        tick,
+                        0,
+                        vec![self.packets[i].sequence_number],
+                    ));
+                }
+            }
+
+            self.packets.clear();
+        }
+
+        ret
+    }
+
     pub fn is_empty(&self) -> bool {
         self.packets.is_empty() && self.sent_packet.is_empty()
     }

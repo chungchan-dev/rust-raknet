@@ -648,6 +648,15 @@ impl RaknetSocket {
                         };
                     },
                     _ = connected.acquire() => {
+                        while let Ok(p) = receiver.try_recv() {
+                            match RaknetSocket::sendto(&s, &p.0, &p.1, p.2, p.3, &None).await {
+                                Ok(_) => {},
+                                Err(e) => {
+                                    raknet_log_debug!("sendto error during drain: {}", e);
+                                    break;
+                                },
+                            }
+                        }
                         raknet_log_debug!("sender close notified");
                         break;
                     }
@@ -743,6 +752,21 @@ impl RaknetSocket {
                 }
 
                 if connected.is_closed() {
+                    for f in sendq.flush_all(cur_timestamp_millis(), &peer_addr) {
+                        let data = f.serialize().unwrap();
+                        RaknetSocket::sendto(
+                            &s,
+                            &data,
+                            &peer_addr,
+                            enable_loss.load(Ordering::Relaxed),
+                            loss_rate.load(Ordering::Relaxed),
+                            &None,
+                        )
+                        .await
+                        .unwrap();
+                    }
+                    drop(sendq);
+
                     for _ in 0..10 {
                         RaknetSocket::sendto(
                             &s,
