@@ -43,10 +43,10 @@ mod datatype;
 pub mod error;
 mod fragment;
 mod log;
-mod packet;
+pub mod packet;
 mod server;
 mod socket;
-mod utils;
+pub mod utils;
 
 pub use crate::arq::Reliability;
 pub use crate::log::enable_raknet_log;
